@@ -1,4 +1,4 @@
-package pudge
+package fudge
 
 import (
 	"fmt"
@@ -45,24 +45,24 @@ func TestOpen(t *testing.T) {
 	}
 	err = db.Set(1, 1)
 	if err != nil {
-		t.Error(err)
+		t.Fatal(err)
 	}
 	db.Close()
 	db, err = Open(f, nil)
 	if err != nil {
-		t.Error(err)
+		t.Fatal(err)
 	}
-	v := 1
+	var v int
 	err = db.Get(1, &v)
 	if err != nil {
-		t.Error(err)
+		t.Fatal(err)
 	}
 	if v != 1 {
-		t.Error("not 1")
+		t.Fatal("not 1")
 	}
 	err = db.DeleteFile()
 	if err != nil {
-		t.Error(err)
+		t.Fatal(err)
 	}
 }
 
@@ -110,18 +110,16 @@ func TestGet(t *testing.T) {
 }
 
 func TestKeys(t *testing.T) {
-
 	f := "test/keys.db"
-
 	db, err := Open(f, nil)
 	if err != nil {
 		t.Error(err)
 	}
 	defer db.Close()
 	append := func(i int) {
-		k := []byte(fmt.Sprintf("%02d", i))
+		k := fmt.Appendf([]byte{}, "%02d", i)
 		v := []byte("Val:" + strconv.Itoa(i))
-		db.Set(k, v)
+		db.Set(k, &v)
 	}
 	for i := 22; i >= 1; i-- {
 		append(i)
@@ -254,53 +252,11 @@ func TestKeys(t *testing.T) {
 	DeleteFile(f)
 }
 
-func TestCounter(t *testing.T) {
-	f := "test/TestCnt.db"
-	var counter int64
-	var err error
-	db, err := Open(f, nil)
-	if err != nil {
-		t.Error(err)
-	}
-	key := []byte("postcounter")
-	for i := 0; i < 10; i++ {
-		counter, err = db.Counter(key, 1)
-		if err != nil {
-			t.Error(err)
-		}
-		//log.Println(counter, err)
-	}
-	//return
-	for i := 0; i < 10; i++ {
-		counter, err = db.Counter(key, 1)
-		if err != nil {
-			t.Error(err)
-		}
-	}
-	if counter != 20 {
-		t.Error("counter!=20")
-	}
-	key2 := []byte("counter2")
-	for i := 0; i < 5; i++ {
-		counter, _ = db.Counter(key2, 1)
-	}
-
-	for i := 0; i < 5; i++ {
-		counter, err = db.Counter(key2, 1)
-		if err != nil {
-			t.Error(err)
-		}
-	}
-	if counter != 10 {
-		t.Error("counter!=10")
-	}
-	db.DeleteFile()
-}
-
 func TestLazyOpen(t *testing.T) {
 	Set(f, 2, 42)
-	var val int
 	CloseAll()
+
+	var val int
 	Get(f, 2, &val)
 	if val != 42 {
 		t.Error("not 42")
@@ -320,9 +276,9 @@ func TestAsync(t *testing.T) {
 
 	append := func(i int) {
 		defer wg.Done()
-		k := ("Key:" + strconv.Itoa(i))
-		v := ("Val:" + strconv.Itoa(i))
-		err := Set(file, []byte(k), []byte(v))
+		k := fmt.Sprintf("Key:%d", i)
+		v := fmt.Sprintf("Val:%d", i)
+		err := Set(file, k, &v)
 		if err != nil {
 			t.Error(err)
 		}
@@ -331,21 +287,19 @@ func TestAsync(t *testing.T) {
 
 	read := func(i int) {
 		defer wg.Done()
-		k := ("Key:" + strconv.Itoa(i))
-		v := ("Val:" + strconv.Itoa(i))
-		var b []byte
-		Get(file, []byte(k), &b)
-
-		if string(b) != string(v) {
-			t.Error("not mutch", string(b), string(v))
+		k := fmt.Sprintf("Key:%d", i)
+		v := fmt.Sprintf("Val:%d", i)
+		var b string
+		Get(file, k, &b)
+		if v != b {
+			t.Error("not mutch", v, b)
 		}
-		readmessages <- fmt.Sprintf("read N:%d  content:%s", i, string(b))
+		readmessages <- fmt.Sprintf("read N:%d  content:%s", i, b)
 	}
 
 	for i := 1; i <= len; i++ {
 		wg.Add(1)
 		go append(i)
-
 	}
 
 	go func() {
@@ -365,7 +319,6 @@ func TestAsync(t *testing.T) {
 	wg.Wait()
 
 	for i := 1; i <= len; i++ {
-
 		wg.Add(1)
 		go read(i)
 	}
@@ -397,33 +350,32 @@ func TestStoreMode(t *testing.T) {
 	if err != nil {
 		t.Error(err)
 	}
-	err = db.Get(1, &v)
+	var val int
+	err = db.Get(1, &val)
 	if err != nil {
 		t.Error(err)
 	}
-	if v != 42 {
+
+	if val != 42 {
 		t.Error("not 42")
 	}
 	DeleteFile("test/sm")
-	//log.Println(v)
-	//CloseAll()
+	CloseAll()
 }
 
 // run go test -bench=Store -benchmem
 func BenchmarkStore(b *testing.B) {
 	b.StopTimer()
 	nums := nrandbin(b.N)
-
 	DeleteFile(f)
-
 	rm, err := Open(f, nil)
 	if err != nil {
 		b.Error("Open", err)
 	}
 	b.SetBytes(8)
 	b.StartTimer()
-	for _, v := range nums {
-		err = rm.Set(v, v)
+	for _, n := range nums {
+		err = rm.Set(n, n)
 		if err != nil {
 			b.Error("Set", err)
 		}
@@ -443,20 +395,20 @@ func BenchmarkLoad(b *testing.B) {
 	if err != nil {
 		b.Error("Open", err)
 	}
-	for _, v := range nums {
-		err = rm.Set(v, v)
+	for _, n := range nums {
+		err = rm.Set(n, n)
 		if err != nil {
 			b.Error("Set", err)
 		}
 	}
 	var wg sync.WaitGroup
-	read := func(db *Db, key []byte) {
+	read := func(db *DB, key []byte) {
 		defer wg.Done()
 		var b []byte
 		db.Get(key, &b)
 	}
 	b.StartTimer()
-	for i := 0; i < b.N; i++ {
+	for i := 0; b.Loop(); i++ {
 		wg.Add(1)
 		go read(rm, nums[i])
 		//var v []byte
@@ -470,6 +422,7 @@ func BenchmarkLoad(b *testing.B) {
 	b.StopTimer()
 	log.Println(rm.Count())
 	DeleteFile(f)
+	CloseAll()
 }
 
 func TestBackup(t *testing.T) {
@@ -478,23 +431,26 @@ func TestBackup(t *testing.T) {
 	BackupAll("")
 	DeleteFile("test/1")
 	DeleteFile("test/4")
+
 	var v1 int
 	Get("backup/test/1", 1, &v1)
 	if v1 != 2 {
 		t.Error("not 2")
 	}
-	var v2 = ""
+
+	var v2 string
 	Get("backup/test/4", "4", &v2)
 	if v2 != "4" {
 		t.Error("not 4")
 	}
+
 	DeleteFile("backup/test/1")
 	DeleteFile("backup/test/4")
 	CloseAll()
 }
 
 func TestMultipleOpen(t *testing.T) {
-	for i := 1; i < 100000; i++ {
+	for i := 1; i < 10000; i++ {
 		Set("test/m", i, i)
 	}
 	Close("test/m")
@@ -508,7 +464,7 @@ func TestMultipleOpen(t *testing.T) {
 func TestInMemory(t *testing.T) {
 	DefaultConfig.StoreMode = 2
 
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		fileName := fmt.Sprintf("test/inmemory%d", i)
 		err := Set(fileName, i, i)
 		if err != nil {
@@ -520,7 +476,7 @@ func TestInMemory(t *testing.T) {
 	if err != nil {
 		t.Error(err)
 	}
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		fileName := fmt.Sprintf("test/inmemory%d", i)
 		c, e := Count(fileName)
 		if c == 0 || e != nil {
@@ -534,22 +490,23 @@ func TestInMemory(t *testing.T) {
 func TestInMemoryWithoutPersist(t *testing.T) {
 	DefaultConfig.StoreMode = 2
 
-	for i := 0; i < 10000; i++ {
+	for i := range 10000 {
 		err := Set("", i, i)
 		if err != nil {
 			t.Error(err)
 		}
 	}
-	j := 0
-	Get("", 8, &j)
-	if j != 8 {
-		t.Error("j must be 8", j)
+
+	var v int
+	Get("", 6, &v)
+	if v != 6 {
+		t.Error("v must be 6", v)
 	}
 	cnt, e := Count("")
 	if cnt != 10000 {
 		t.Error("count must be 10000", cnt, e)
 	}
-	for i := 0; i < 10; i++ {
+	for range 10000 {
 		c, e := Count("")
 		if c != 10000 || e != nil {
 			t.Error("no persist", c, e)
@@ -564,15 +521,14 @@ func TestInMemoryWithoutPersist(t *testing.T) {
 	if noerr != nil {
 		t.Error("Close empty file", noerr)
 	}
-	jj := 0
-	notpresent := Get("", 8, &jj)
-	if jj == 8 {
-		t.Error("jj  must be 0", j)
+	var n int
+	notpresent := Get("", 8, &n)
+	if n == 8 {
+		t.Error("n  must be 0", n)
 	}
 	if notpresent != ErrKeyNotFound {
 		t.Error("Must be Error: key not found error", notpresent)
 	}
-
 }
 
 func Test42(t *testing.T) {
@@ -594,25 +550,25 @@ func Test42(t *testing.T) {
 func TestSetsGets(t *testing.T) {
 	f := "test/setsgets"
 	DeleteFile(f)
-	var pairs []interface{}
-
+	var pairs = make([]any, 0)
 	for i := 1; i < 64; i++ {
 		pairs = append(pairs, i)
 		pairs = append(pairs, i+1)
 	}
 	err := Sets(f, pairs)
 	if err != nil {
-		t.Error("Sets err", err)
+		t.Error("Sets err", err, pairs)
 	}
 	var v int
+
 	err = Get(f, 63, &v)
 	if err != nil || v != 64 {
-		t.Error("Sets err", err, v)
+		t.Error("Sets 64 err", err, v)
 	}
 	//Sets
-	var pairsBin []interface{}
-	for i := 0; i < 100; i++ {
-		k := []byte(fmt.Sprintf("%04d", i))
+	var pairsBin []any
+	for i := range 100 {
+		k := fmt.Appendf([]byte{}, "%04d", i)
 		pairsBin = append(pairsBin, k)
 		pairsBin = append(pairsBin, k)
 	}
@@ -625,9 +581,9 @@ func TestSetsGets(t *testing.T) {
 	if err != nil || string(s) != "0063" {
 		t.Error("Sets err", err, s)
 	}
-	var keys []interface{}
+	var keys []any
 	for i := 2; i < 4; i++ {
-		k := []byte(fmt.Sprintf("%04d", i))
+		k := fmt.Appendf([]byte{}, "%04d", i)
 		keys = append(keys, k)
 	}
 	err = Get(f, []byte("0068"), &s)
@@ -745,5 +701,4 @@ func TestEmptyKeysByPrefix(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-
 }

@@ -1,12 +1,11 @@
-package pudge
+package fudge
 
 import (
 	"bytes"
 	"context"
 	"encoding/binary"
-	"encoding/gob"
 	"errors"
-	"io/ioutil"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -17,15 +16,15 @@ import (
 var (
 	dbs struct {
 		sync.RWMutex
-		dbs map[string]*Db
+		dbs map[string]*DB
 	}
+
 	// ErrKeyNotFound - key not found
-	ErrKeyNotFound = errors.New("Error: key not found")
-	mutex          = &sync.RWMutex{}
+	ErrKeyNotFound = errors.New("error: key not found")
 )
 
-// Db represent database
-type Db struct {
+// DB represent database
+type DB struct {
 	sync.RWMutex
 	name         string
 	fk           *os.File
@@ -57,14 +56,13 @@ type Config struct {
 }
 
 func init() {
-	dbs.dbs = make(map[string]*Db)
+	dbs.dbs = make(map[string]*DB)
 }
 
-func newDb(f string, cfg *Config) (*Db, error) {
-	//fmt.Println("newdb2:", f, cfg.StoreMode)
+func newDB(f string, cfg *Config) (*DB, error) {
 	var err error
 	// create
-	db := new(Db)
+	db := new(DB)
 	db.Lock()
 	defer db.Unlock()
 	// init
@@ -107,7 +105,7 @@ func newDb(f string, cfg *Config) (*Db, error) {
 	}
 	//read keys
 	buf := new(bytes.Buffer)
-	b, err := ioutil.ReadAll(db.fk)
+	b, err := io.ReadAll(db.fk)
 	if err != nil {
 		return nil, err
 	}
@@ -129,7 +127,7 @@ func newDb(f string, cfg *Config) (*Db, error) {
 		}
 		if db.storemode == 2 {
 			cmd.Val = make([]byte, size)
-			db.fv.ReadAt(cmd.Val, int64(seek))
+			_, _ = db.fv.ReadAt(cmd.Val, int64(seek))
 		}
 		readSeek += uint32(16 + sizeKey)
 		switch t {
@@ -153,7 +151,7 @@ func newDb(f string, cfg *Config) (*Db, error) {
 
 // backgroundManager runs continuously in the background and performs various
 // operations such as syncing to disk.
-func (db *Db) backgroundManager(interval int) {
+func (db *DB) backgroundManager(interval int) {
 	ctx, cancel := context.WithCancel(context.Background())
 	db.cancelSyncer = cancel
 	go func() {
@@ -163,8 +161,8 @@ func (db *Db) backgroundManager(interval int) {
 				return
 			default:
 				db.Lock()
-				db.fk.Sync()
-				db.fv.Sync()
+				_ = db.fk.Sync()
+				_ = db.fv.Sync()
 				db.Unlock()
 				time.Sleep(time.Duration(interval) * time.Second)
 			}
@@ -172,15 +170,14 @@ func (db *Db) backgroundManager(interval int) {
 	}()
 }
 
-//appendKey insert key in slice
-func (db *Db) appendKey(b []byte) {
+// appendKey insert key in slice
+func (db *DB) appendKey(b []byte) {
 	//log.Println("append")
 	db.keys = append(db.keys, b)
-	return
 }
 
 // deleteFromKeys delete key from slice keys
-func (db *Db) deleteFromKeys(b []byte) {
+func (db *DB) deleteFromKeys(b []byte) {
 	found := db.found(b, true)
 	if found < len(db.keys) {
 		if bytes.Equal(db.keys[found], b) {
@@ -189,19 +186,19 @@ func (db *Db) deleteFromKeys(b []byte) {
 	}
 }
 
-func (db *Db) sort() {
+func (db *DB) sort() {
 	if !sort.SliceIsSorted(db.keys, db.lessBinary) {
 		//log.Println("sort")
 		sort.Slice(db.keys, db.lessBinary)
 	}
 }
 
-func (db *Db) lessBinary(i, j int) bool {
+func (db *DB) lessBinary(i, j int) bool {
 	return bytes.Compare(db.keys[i], db.keys[j]) <= 0
 }
 
-//found return binary search result with sort order
-func (db *Db) found(b []byte, asc bool) int {
+// found return binary search result with sort order
+func (db *DB) found(b []byte, _ bool) int {
 	db.sort()
 	//if asc {
 	return sort.Search(len(db.keys), func(i int) bool {
@@ -211,54 +208,6 @@ func (db *Db) found(b []byte, asc bool) int {
 	//return sort.Search(len(db.keys), func(i int) bool {
 	//	return bytes.Compare(db.keys[i], b) <= 0
 	//})
-}
-
-// KeyToBinary return key in bytes
-func KeyToBinary(v interface{}) ([]byte, error) {
-	var err error
-
-	switch v.(type) {
-	case []byte:
-		return v.([]byte), nil
-	case bool, float32, float64, complex64, complex128, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64:
-		buf := new(bytes.Buffer)
-		err = binary.Write(buf, binary.BigEndian, v)
-		return buf.Bytes(), err
-	case int:
-		val := uint64(v.(int))
-		p := make([]byte, 8)
-		p[0] = byte(val >> 56)
-		p[1] = byte(val >> 48)
-		p[2] = byte(val >> 40)
-		p[3] = byte(val >> 32)
-		p[4] = byte(val >> 24)
-		p[5] = byte(val >> 16)
-		p[6] = byte(val >> 8)
-		p[7] = byte(val)
-		return p, err
-	case string:
-		return []byte(v.(string)), nil
-	default:
-		buf := new(bytes.Buffer)
-		err = gob.NewEncoder(buf).Encode(v)
-		return buf.Bytes(), err
-	}
-}
-
-// ValToBinary return value in bytes
-func ValToBinary(v interface{}) ([]byte, error) {
-	var err error
-	switch v.(type) {
-	case []byte:
-		return v.([]byte), nil
-	default:
-		buf := new(bytes.Buffer)
-		err = gob.NewEncoder(buf).Encode(v)
-		if err != nil {
-			return nil, err
-		}
-		return buf.Bytes(), err
-	}
 }
 
 func writeKeyVal(fk, fv *os.File, readKey, writeVal []byte, exists bool, oldCmd *Cmd) (cmd *Cmd, err error) {
@@ -319,13 +268,13 @@ func writeKey(fk *os.File, t uint8, seek, size uint32, key []byte, keySeek int64
 	buf.Grow(16 + len(key))
 
 	//encode
-	binary.Write(buf, binary.BigEndian, uint8(0))                  //1byte version
-	binary.Write(buf, binary.BigEndian, t)                         //1byte command code(0-set,1-delete)
-	binary.Write(buf, binary.BigEndian, seek)                      //4byte seek
-	binary.Write(buf, binary.BigEndian, size)                      //4byte size
-	binary.Write(buf, binary.BigEndian, uint32(time.Now().Unix())) //4byte timestamp
-	binary.Write(buf, binary.BigEndian, uint16(len(key)))          //2byte key size
-	buf.Write(key)                                                 //key
+	_ = binary.Write(buf, binary.BigEndian, uint8(0))                  //1byte version
+	_ = binary.Write(buf, binary.BigEndian, t)                         //1byte command code(0-set,1-delete)
+	_ = binary.Write(buf, binary.BigEndian, seek)                      //4byte seek
+	_ = binary.Write(buf, binary.BigEndian, size)                      //4byte size
+	_ = binary.Write(buf, binary.BigEndian, uint32(time.Now().Unix())) //4byte timestamp
+	_ = binary.Write(buf, binary.BigEndian, uint16(len(key)))          //2byte key size
+	_, _ = buf.Write(key)                                              //key
 
 	if keySeek < 0 {
 		newSeek, _, err = writeAtPos(fk, buf.Bytes(), int64(-1))
@@ -339,7 +288,7 @@ func writeKey(fk *os.File, t uint8, seek, size uint32, key []byte, keySeek int64
 // findKey return index of first key in ascending mode
 // findKey return index of last key in descending mode
 // findKey return 0 or len-1 in case of nil key
-func (db *Db) findKey(key interface{}, asc bool) (int, error) {
+func (db *DB) findKey(key any, asc bool) (int, error) {
 	if key == nil {
 		db.sort()
 		if asc {
@@ -371,10 +320,10 @@ func startFrom(a, b []byte) bool {
 	if len(a) < len(b) {
 		return false
 	}
-	return bytes.Compare(a[:len(b)], b) == 0
+	return bytes.Equal(a[:len(b)], b)
 }
 
-func (db *Db) foundPref(b []byte, asc bool) int {
+func (db *DB) foundPref(b []byte, asc bool) int {
 	db.sort()
 	if asc {
 		return sort.Search(len(db.keys), func(i int) bool {

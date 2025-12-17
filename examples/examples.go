@@ -3,7 +3,7 @@ package main
 import (
 	"log"
 
-	"github.com/recoilme/pudge"
+	"fudge"
 )
 
 func main() {
@@ -15,42 +15,42 @@ func main() {
 	ExampleInMemoryWithoutPersist()
 }
 
-//ExampleSet lazy
+// ExampleSet lazy
 func ExampleSet() {
-	pudge.Set("../test/test", "Hello", "World")
-	defer pudge.CloseAll()
+	_ = fudge.Set("../test/test", "Hello", "World")
+	defer fudge.CloseAll()
 }
 
-//ExampleGet lazy
+// ExampleGet lazy
 func ExampleGet() {
-	output := ""
-	pudge.Get("../test/test", "Hello", &output)
-	log.Println("Output:", output)
+	var output string
+	_ = fudge.Get("../test/test", "Hello", &output)
+	log.Printf("Hello: %v", output)
 	// Output: World
-	defer pudge.CloseAll()
+	defer fudge.CloseAll()
 }
 
-//ExampleDelete lazy
+// ExampleDelete lazy
 func ExampleDelete() {
-	err := pudge.Delete("../test/test", "Hello")
-	if err == pudge.ErrKeyNotFound {
+	err := fudge.Delete("../test/test", "Hello")
+	if err == fudge.ErrKeyNotFound {
 		log.Println(err)
 	}
 }
 
-//ExampleDeleteFile lazy
+// ExampleDeleteFile lazy
 func ExampleDeleteFile() {
-	err := pudge.DeleteFile("../test/test")
+	err := fudge.DeleteFile("../test/test")
 	if err != nil {
 		log.Panic(err)
 	}
 }
 
-//ExampleOpen complex example
+// ExampleOpen complex example
 func ExampleOpen() {
-	cfg := &pudge.Config{
+	cfg := &fudge.Config{
 		SyncInterval: 0} //disable every second fsync
-	db, err := pudge.Open("../test/db", cfg)
+	db, err := fudge.Open("../test/db", cfg)
 	if err != nil {
 		log.Panic(err)
 	}
@@ -63,25 +63,23 @@ func ExampleOpen() {
 		p := &Point{X: i, Y: i}
 		db.Set(i, p)
 	}
-	var point Point
-	db.Get(8, &point)
-	log.Println(point)
+	point := new(Point)
+	db.Get(8, point)
+	log.Printf("Point %v", *point)
 	// Output: {8 8}
 	// Select 2 keys, from 7 in ascending order
 	keys, _ := db.Keys(7, 2, 0, true)
 	for _, key := range keys {
-		var p Point
-		db.Get(key, &p)
-		log.Println(p)
+		p := new(Point)
+		db.Get(key, p)
+		log.Printf("Point %v", *p)
 	}
-	// Output: {8 8}
-	// Output: {9 9}
 }
 
 // ExampleInMemoryWithoutPersist -if file is empty in storemode 2 - without persist
 func ExampleInMemoryWithoutPersist() {
-	cfg := &pudge.Config{StoreMode: 2} //in memory
-	db, err := pudge.Open("", cfg)     // if file is empty in storemode 2 - without persist
+	cfg := &fudge.Config{StoreMode: 2} //in memory
+	db, err := fudge.Open("", cfg)     // if file is empty in storemode 2 - without persist
 	if err != nil {
 		log.Panic(err)
 	}
@@ -94,16 +92,13 @@ func ExampleInMemoryWithoutPersist() {
 		p := &Point{X: i, Y: i}
 		db.Set(i, p)
 	}
-	var point Point
-	db.Get(89, &point)
-	log.Println(point)
-	// Output: {89 89}
+	point := new(Point)
+	db.Get(89, point)
+	log.Printf("Point %v", *point)
 	keys, _ := db.Keys(77, 2, 0, true)
 	for _, key := range keys {
-		var p Point
-		db.Get(key, &p)
-		log.Println(p)
+		p := new(Point)
+		db.Get(key, p)
+		log.Printf("Point %v", *p)
 	}
-	// Output: {78 78}
-	// Output: {79 79}
 }

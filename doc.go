@@ -8,13 +8,13 @@
 //	import (
 //		"log"
 //
-//		"github.com/recoilme/pudge"
+//		"github.com/gnuos/fudge"
 //	)
 //
 //	func main() {
-//		cfg := pudge.DefaultConfig()
+//		cfg := fudge.DefaultConfig()
 //		cfg.SyncInterval = 0 //disable every second fsync
-//		db, err := pudge.Open("../test/db", cfg)
+//		db, err := fudge.Open("../test/db", cfg)
 //		if err != nil {
 //			log.Panic(err)
 //		}
@@ -27,9 +27,9 @@
 //			p := &Point{X: i, Y: i}
 //			db.Set(i, p)
 //		}
-//		var point Point
-//		db.Get(8, &point)
+//		point := new(Point)
+//		db.Get(8, point)
 //		log.Println(point)
 //		// Output: {8 8}
 //	}
-package pudge
+package fudge

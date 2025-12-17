@@ -1,9 +1,11 @@
-package pudge
+package fudge
 
 import (
 	"bytes"
-	"encoding/gob"
 	"os"
+	"path"
+
+	"github.com/fxamacker/cbor/v2"
 )
 
 // DefaultConfig is default config
@@ -11,14 +13,15 @@ var DefaultConfig = &Config{
 	FileMode:     0644,
 	DirMode:      0755,
 	SyncInterval: 0,
-	StoreMode:    0}
+	StoreMode:    0,
+}
 
 // Open return db object if it opened.
 // Create new db if not exist.
 // Read db to obj if exist.
 // Or error if any.
 // Default Config (if nil): &Config{FileMode: 0644, DirMode: 0755, SyncInterval: 0}
-func Open(f string, cfg *Config) (*Db, error) {
+func Open(f string, cfg *Config) (*DB, error) {
 	if cfg == nil {
 		cfg = DefaultConfig
 	}
@@ -30,8 +33,7 @@ func Open(f string, cfg *Config) (*Db, error) {
 	}
 	dbs.RUnlock()
 	dbs.Lock()
-	db, err := newDb(f, cfg)
-	//log.Println("n", db.name, db.config.StoreMode)
+	db, err := newDB(f, cfg)
 	if err == nil {
 		dbs.dbs[f] = db
 	}
@@ -40,7 +42,7 @@ func Open(f string, cfg *Config) (*Db, error) {
 }
 
 // Set store any key value to db
-func (db *Db) Set(key, value interface{}) error {
+func (db *DB) Set(key any, value any) error {
 	db.Lock()
 	defer db.Unlock()
 	k, err := KeyToBinary(key)
@@ -51,9 +53,8 @@ func (db *Db) Set(key, value interface{}) error {
 	if err != nil {
 		return err
 	}
-	//log.Println("Set:", k, v)
+
 	oldCmd, exists := db.vals[string(k)]
-	//fmt.Println("StoreMode", db.config.StoreMode)
 	if db.storemode == 2 {
 		cmd := &Cmd{}
 		cmd.Size = uint32(len(v))
@@ -76,7 +77,7 @@ func (db *Db) Set(key, value interface{}) error {
 
 // Get return value by key
 // Return error if any.
-func (db *Db) Get(key, value interface{}) error {
+func (db *DB) Get(key any, value any) error {
 	db.RLock()
 	defer db.RUnlock()
 	k, err := KeyToBinary(key)
@@ -84,43 +85,45 @@ func (db *Db) Get(key, value interface{}) error {
 		return err
 	}
 	if val, ok := db.vals[string(k)]; ok {
-		switch value.(type) {
+		switch value := value.(type) {
 		case *[]byte:
-			b := make([]byte, val.Size)
-			if db.storemode == 2 {
-				copy(b, val.Val)
-			} else {
-				_, err := db.fv.ReadAt(b, int64(val.Seek))
-				if err != nil {
-					return err
+			{
+				b := make([]byte, val.Size)
+				if db.storemode == 2 {
+					copy(b, val.Val)
+				} else {
+					_, err := db.fv.ReadAt(b, int64(val.Seek))
+					if err != nil {
+						return err
+					}
 				}
-			}
-			*value.(*[]byte) = b
-			return nil
-		default:
 
-			buf := new(bytes.Buffer)
-			b := make([]byte, val.Size)
-			if db.storemode == 2 {
-				//fmt.Println(val)
-				copy(b, val.Val)
-			} else {
-				_, err := db.fv.ReadAt(b, int64(val.Seek))
-				if err != nil {
-					return err
-				}
+				*value = b
+				return nil
 			}
-			buf.Write(b)
-			err = gob.NewDecoder(buf).Decode(value)
-			return err
+		default:
+			{
+				b := make([]byte, val.Size)
+				if db.storemode == 2 {
+					copy(b, val.Val)
+				} else {
+					_, err := db.fv.ReadAt(b, int64(val.Seek))
+					if err != nil {
+						return err
+					}
+				}
+
+				return cbor.Unmarshal(b, value)
+			}
 		}
 	}
+
 	return ErrKeyNotFound
 }
 
 // Close - sync & close files.
 // Return error if any.
-func (db *Db) Close() error {
+func (db *DB) Close() error {
 	if db.cancelSyncer != nil {
 		db.cancelSyncer()
 	}
@@ -184,7 +187,7 @@ func CloseAll() (err error) {
 }
 
 // DeleteFile close and delete file
-func (db *Db) DeleteFile() error {
+func (db *DB) DeleteFile() error {
 	return DeleteFile(db.name)
 }
 
@@ -215,7 +218,7 @@ func DeleteFile(file string) error {
 
 // Has return true if key exists.
 // Return error if any.
-func (db *Db) Has(key interface{}) (bool, error) {
+func (db *DB) Has(key any) (bool, error) {
 	db.RLock()
 	defer db.RUnlock()
 	k, err := KeyToBinary(key)
@@ -227,7 +230,7 @@ func (db *Db) Has(key interface{}) (bool, error) {
 }
 
 // FileSize returns the total size of the disk storage used by the DB.
-func (db *Db) FileSize() (int64, error) {
+func (db *DB) FileSize() (int64, error) {
 	db.RLock()
 	defer db.RUnlock()
 	var err error
@@ -243,7 +246,7 @@ func (db *Db) FileSize() (int64, error) {
 }
 
 // Count returns the number of items in the Db.
-func (db *Db) Count() (int, error) {
+func (db *DB) Count() (int, error) {
 	db.RLock()
 	defer db.RUnlock()
 	return len(db.keys), nil
@@ -251,7 +254,7 @@ func (db *Db) Count() (int, error) {
 
 // Delete remove key
 // Returns error if key not found
-func (db *Db) Delete(key interface{}) error {
+func (db *DB) Delete(key any) error {
 	db.Lock()
 	defer db.Unlock()
 	k, err := KeyToBinary(key)
@@ -272,12 +275,12 @@ func (db *Db) Delete(key interface{}) error {
 // if limit == 0 return all keys
 // if offset > 0 - skip offset records
 // If from not nil - return keys after from (from not included)
-func (db *Db) KeysByPrefix(prefix []byte, limit, offset int, asc bool) ([][]byte, error) {
+func (db *DB) KeysByPrefix(prefix []byte, limit, offset int, asc bool) ([][]byte, error) {
 	//log.Println("KeysByPrefix")
 	db.RLock()
 	defer db.RUnlock()
 	// resulting array
-	arr := make([][]byte, 0, 0)
+	arr := make([][]byte, 0)
 	found := db.foundPref(prefix, asc)
 	if found < 0 || found >= len(db.keys) || !startFrom(db.keys[found], prefix) {
 		//not found
@@ -312,16 +315,15 @@ func (db *Db) KeysByPrefix(prefix []byte, limit, offset int, asc bool) ([][]byte
 // if limit == 0 return all keys
 // if offset > 0 - skip offset records
 // If from not nil - return keys after from (from not included)
-func (db *Db) Keys(from interface{}, limit, offset int, asc bool) ([][]byte, error) {
+func (db *DB) Keys(from any, limit, offset int, asc bool) ([][]byte, error) {
 	// resulting array
 	//log.Println("pudge", from, from == nil)
-	arr := make([][]byte, 0, 0)
+	arr := make([][]byte, 0)
 	excludeFrom := 0
 	if from != nil {
 		excludeFrom = 1
 
 		k, err := KeyToBinary(from)
-		//log.Println(bytes.Equal(k[len(k)-1:], []byte("*")))
 		if err != nil {
 			return arr, err
 		}
@@ -363,24 +365,8 @@ func (db *Db) Keys(from interface{}, limit, offset int, asc bool) ([][]byte, err
 	return arr, nil
 }
 
-// Counter return int64 incremented on incr
-func (db *Db) Counter(key interface{}, incr int) (int64, error) {
-	mutex.Lock()
-	var counter int64
-	err := db.Get(key, &counter)
-	if err != nil && err != ErrKeyNotFound {
-		return -1, err
-	}
-	//mutex.Lock()
-	counter = counter + int64(incr)
-	//mutex.Unlock()
-	err = db.Set(key, counter)
-	mutex.Unlock()
-	return counter, err
-}
-
 // Set store any key value to db with opening if needed
-func Set(f string, key, value interface{}) error {
+func Set(f string, key any, value any) error {
 	db, err := Open(f, nil)
 	if err != nil {
 		return err
@@ -391,29 +377,31 @@ func Set(f string, key, value interface{}) error {
 // Sets store vals and keys
 // Use it for mass insertion
 // every pair must contain key and value
-func Sets(file string, pairs []interface{}) (err error) {
+func Sets(file string, pairs []any) (err error) {
 	db, err := Open(file, nil)
 	if err != nil {
 		return err
 	}
+
 	for i := range pairs {
 		if i%2 != 0 {
-			// on odd - append val and store key
 			if pairs[i] == nil || pairs[i-1] == nil {
-				break
+				continue
 			}
+
 			err = db.Set(pairs[i-1], pairs[i])
 			if err != nil {
 				break
 			}
 		}
 	}
+
 	return err
 }
 
 // Get return value by key with opening if needed
 // Return error if any.
-func Get(f string, key, value interface{}) error {
+func Get(f string, key any, value any) error {
 	db, err := Open(f, nil)
 	if err != nil {
 		return err
@@ -425,11 +413,13 @@ func Get(f string, key, value interface{}) error {
 // result contains key and value
 // Gets not return error if key not found
 // If no keys found return empty result
-func Gets(file string, keys []interface{}) (result [][]byte) {
+func Gets(file string, keys []any) (result [][]byte) {
 	db, err := Open(file, nil)
 	if err != nil {
 		return nil
 	}
+
+	result = make([][]byte, 0)
 	for _, key := range keys {
 		var v []byte
 		err := db.Get(key, &v)
@@ -444,21 +434,13 @@ func Gets(file string, keys []interface{}) (result [][]byte) {
 			}
 		}
 	}
-	return result
-}
 
-// Counter return int64 incremented on incr with lazy open
-func Counter(f string, key interface{}, incr int) (int64, error) {
-	db, err := Open(f, nil)
-	if err != nil {
-		return 0, err
-	}
-	return db.Counter(key, incr)
+	return result
 }
 
 // Delete remove key
 // Returns error if key not found
-func Delete(f string, key interface{}) error {
+func Delete(f string, key any) error {
 	db, err := Open(f, nil)
 	if err != nil {
 		return err
@@ -470,7 +452,7 @@ func Delete(f string, key interface{}) error {
 // if limit == 0 return all keys
 // if offset > 0 - skip offset records
 // If from not nil - return keys after from (from not included)
-func Keys(f string, from interface{}, limit, offset int, asc bool) ([][]byte, error) {
+func Keys(f string, from any, limit, offset int, asc bool) ([][]byte, error) {
 	db, err := Open(f, nil)
 	if err != nil {
 		return nil, err
@@ -480,7 +462,7 @@ func Keys(f string, from interface{}, limit, offset int, asc bool) ([][]byte, er
 
 // Has return true if key exists.
 // Return error if any.
-func Has(f string, key interface{}) (bool, error) {
+func Has(f string, key any) (bool, error) {
 	db, err := Open(f, nil)
 	if err != nil {
 		return false, err
@@ -518,20 +500,19 @@ func BackupAll(dir string) (err error) {
 	dbs.Lock()
 	stores := dbs.dbs
 	dbs.Unlock()
-	//tmp := make(map[string]string)
+
 	for _, db := range stores {
-		backup := dir + "/" + db.name
+		backup := path.Join(dir, db.name)
 		DeleteFile(backup)
 		keys, err := db.Keys(nil, 0, 0, true)
 		if err == nil {
 			for _, k := range keys {
 				var b []byte
-				db.Get(k, &b)
+				_ = db.Get(k, &b)
 				Set(backup, k, b)
 			}
 		}
 		Close(backup)
 	}
-
 	return err
 }

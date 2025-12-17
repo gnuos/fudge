@@ -1,4 +1,4 @@
-package pudge
+package fudge
 
 import (
 	"fmt"
@@ -21,11 +21,12 @@ func ExampleOpen() {
 		p := &Point{X: i, Y: i}
 		db.Set(i, p)
 	}
-	var point Point
-	db.Get(8, &point)
-	fmt.Println(point)
+	point := new(Point)
+	db.Get(8, point)
+	fmt.Printf("%v\n", *point)
 	// Output: {8 8}
 }
+
 func ExampleSet() {
 	Set("test/test", "Hello", "World")
 	defer CloseAll()
@@ -33,10 +34,10 @@ func ExampleSet() {
 
 func ExampleGet() {
 	Set("test/test", "Hello", "World")
-	output := ""
+	var output string
 	Get("test/test", "Hello", &output)
 	defer CloseAll()
-	fmt.Println(output)
+	fmt.Printf("%v\n", output)
 	// Output: World
 	DeleteFile("test/test")
 }
