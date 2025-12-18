@@ -211,7 +211,6 @@ func (db *DB) found(b []byte, _ bool) int {
 }
 
 func writeKeyVal(fk, fv *os.File, readKey, writeVal []byte, exists bool, oldCmd *Cmd) (cmd *Cmd, err error) {
-
 	var seek, newSeek int64
 	cmd = &Cmd{Size: uint32(len(writeVal))}
 	if exists {

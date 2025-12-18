@@ -1,4 +1,4 @@
-module fudge
+module github.com/gnuos/fudge
 
 go 1.24
 
