@@ -3,7 +3,7 @@ package main
 import (
 	"log"
 
-	"fudge"
+	"github.com/gnuos/fudge"
 )
 
 func main() {
